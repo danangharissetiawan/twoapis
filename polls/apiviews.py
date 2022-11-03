@@ -3,14 +3,23 @@ from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIV
 from rest_framework.views import APIView
 from rest_framework import status, viewsets
 from rest_framework.response import Response
+from rest_framework.exceptions import PermissionDenied
+
+from django.contrib.auth import authenticate
 
 from .models import Poll, Choice
-from .serializers import PollSerializer, ChoiceSerializer, VoteSerializer
+from .serializers import PollSerializer, ChoiceSerializer, VoteSerializer, UserSerializer
 
 
 class PollViewSet(viewsets.ModelViewSet):
     queryset = Poll.objects.all()
     serializer_class = PollSerializer
+
+    def destroy(self, request, *args, **kwargs):
+        poll = Poll.objects.get(pk=kwargs['pk'])
+        if not request.user == poll.created_by:
+            raise PermissionDenied("You can not delete this poll.")
+        return super().destroy(request, *args, **kwargs)
 
 
 class PollList(ListCreateAPIView):
@@ -29,6 +38,14 @@ class ChoiceList(ListCreateAPIView):
         return queryset
     serializer_class = ChoiceSerializer
 
+    def post(self, request, *args, **kwargs):
+        vote = VoteSerializer(data=request.data)
+        if vote.is_valid():
+            vote.save()
+            return Response(vote.data, status=status.HTTP_201_CREATED)
+        else:
+            return Response(vote.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 class CreateVote(APIView):
     serializer_class = VoteSerializer
@@ -42,3 +59,23 @@ class CreateVote(APIView):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         else:
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UserCreate(CreateAPIView):
+    authentication_classes = ()
+    permission_classes = ()
+    serializer_class = UserSerializer
+
+
+class LoginView(APIView):
+    permission_classes = ()
+
+    def post(self, request):
+        username = request.data.get("username")
+        password = request.data.get("password")
+        user = authenticate(username=username, password=password)
+        if user:
+            return Response({"token": user.auth_token.key})
+        else:
+            return Response({"error": "Wrong Credentials"}, status=status.HTTP_400_BAD_REQUEST)
+
